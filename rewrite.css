@@ -1,0 +1,33 @@
+.date-picker-container {
+    position: fixed;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    background-color: rgb(39 48 61);
+}
+
+.date-picker-container .rdrDateRangeWrapper {
+    background-color: rgb(39 48 61);
+}
+
+.date-picker-container .rdrDateDisplayWrapper {
+    background-color: rgb(39 48 61);
+    display: none;
+}
+
+.date-picker-container .rdrDayNumber span {
+    color: #fff;
+}
+
+.date-picker-container .rdrMonthAndYearPickers select {
+    color: #fff;
+}
+
+.date-picker-close,
+.date-picker-clear {
+    margin: 20px 0px 10px 9px;
+}
+
+.error-message {
+    color: #ff0505;
+}

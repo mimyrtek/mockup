@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Boxes</title>
+<link href="bootstrap-grid.css" rel="stylesheet"/>
+<link href="main.css" rel="stylesheet"/>
+<link href="rewrite.css" rel="stylesheet"/>
+<style>
+    .box-page {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2rem;
+    }
+    .box-form {
+      flex: 1;
+      min-width: 300px;
+    }
+    .box-3d-container {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      perspective: 1000px;
+    }
+    .box-3d {
+      position: relative;
+      transform-style: preserve-3d;
+      transform: rotateX(-20deg) rotateY(30deg);
+    }
+    .box-face {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background-color: #deb887;
+      border: 1px solid #333;
+      opacity: 0.95;
+    }
+    .box-item {
+      background-color: #222;
+      padding: 15px;
+      margin-bottom: 10px;
+      color: #fff;
+      border-left: 5px solid;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+  </style>
+</head>
+<body class="dark">
+<header class="header">
+<div class="header-container">
+<div class="header-logo">
+<img alt="Logo" class="logo" src="assets/img/logo.svg"/>
+</div>
+<nav class="nav d-none d-md-block">
+<ul class="nav__list">
+<li><a href="home.html">Home</a></li>
+<li><a href="boxes.html">Boxes</a></li>
+<li><a href="pallets.html">Build Pallets</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<main class="main">
+<div class="container mt-5">
+<h1 class="main-title">Define or Edit a Box</h1>
+<div class="box-page">
+  <div style="flex: 1; min-width: 300px;">
+    <form id="boxForm" class="calc box-form">
+      <input type="hidden" id="boxIndex" value="-1" />
+      <div class="calc-sidebar">
+        <div class="calc-sidebar-item">
+          <label class="calc-label">
+            <span class="calc-input-name">Box Name</span>
+            <input type="text" class="calc-input" id="boxName" required />
+          </label>
+        </div>
+        <div class="calc-sidebar-item">
+          <label class="calc-label">
+            <span class="calc-input-name">Length (cm)</span>
+            <input type="number" class="calc-input" id="boxLength" required />
+          </label>
+        </div>
+        <div class="calc-sidebar-item">
+          <label class="calc-label">
+            <span class="calc-input-name">Width (cm)</span>
+            <input type="number" class="calc-input" id="boxWidth" required />
+          </label>
+        </div>
+        <div class="calc-sidebar-item">
+          <label class="calc-label">
+            <span class="calc-input-name">Height (cm)</span>
+            <input type="number" class="calc-input" id="boxHeight" required />
+          </label>
+        </div>
+        <div class="calc-sidebar-item">
+          <label class="calc-label">
+            <span class="calc-input-name">Color</span>
+            <select id="boxColor" class="calc-input" style="font-family: monospace;">
+  <option value="#deb887" style="background-color:#deb887;color:black;">Light Brown</option>
+  <option value="#ffffff" style="background-color:#ffffff;color:black;">White</option>
+  <option value="#000000" style="background-color:#000000;color:white;">Black</option>
+  <option value="#ff0000" style="background-color:#ff0000;color:white;">Red</option>
+  <option value="#00ff00" style="background-color:#00ff00;color:black;">Lime</option>
+  <option value="#0000ff" style="background-color:#0000ff;color:white;">Blue</option>
+  <option value="#ffff00" style="background-color:#ffff00;color:black;">Yellow</option>
+  <option value="#ffa500" style="background-color:#ffa500;color:black;">Orange</option>
+  <option value="#800080" style="background-color:#800080;color:white;">Purple</option>
+  <option value="#808080" style="background-color:#808080;color:white;">Gray</option>
+  <option value="#00ffff" style="background-color:#00ffff;color:black;">Cyan</option>
+  <option value="#ff00ff" style="background-color:#ff00ff;color:black;">Magenta</option>
+  <option value="#8b4513" style="background-color:#8b4513;color:white;">SaddleBrown</option>
+  <option value="#a52a2a" style="background-color:#a52a2a;color:white;">Brown</option>
+  <option value="#f5f5dc" style="background-color:#f5f5dc;color:black;">Beige</option>
+  <option value="#4682b4" style="background-color:#4682b4;color:white;">SteelBlue</option>
+</select>
+<div class="calc-sidebar-item">
+  <label class="calc-label">
+    <span class="calc-input-name">Weight (kg)</span>
+    <input type="number" class="calc-input" id="boxWeight" step="0.01" required />
+  </label>
+</div>
+<div class="calc-sidebar-item">
+  <span class="calc-input-name">Can be stacked</span><br/>
+  <label><input type="radio" name="stackable" value="yes" checked /> Yes</label>
+  <label><input type="radio" name="stackable" value="no" /> No</label>
+</div>
+<div class="calc-sidebar-item">
+  <span class="calc-input-name">Can be stacked in any direction</span><br/>
+  <label><input type="radio" name="anyDirection" value="yes" checked /> Yes</label>
+  <label><input type="radio" name="anyDirection" value="no" /> No</label>
+</div>
+
+          </label>
+        </div>
+        <button type="submit" class="calc-btn calc-btn-main mt-3">Save Box</button>
+      </div>
+    </form>
+  </div>
+
+  <div style="flex: 1; min-width: 300px;">
+    <div class="box-list" id="boxList">
+      <h2 class="main-title mt-5">Defined Boxes</h2>
+    </div>
+  </div>
+
+  <div style="flex: 1; min-width: 300px;">
+    <div class="box-3d-container">
+      <div id="box3d" class="box-3d"></div>
+    </div>
+  </div>
+</div>
+
+</div>
+</main>
+<script>
+    const form = document.getElementById('boxForm');
+    const list = document.getElementById('boxList');
+    const box3d = document.getElementById('box3d');
+
+    function update3DBox(width, height, depth, color) {
+      const scale = 1.5;
+      const w = width * scale;
+      const h = height * scale;
+      const d = depth * scale;
+
+      box3d.innerHTML = '';
+      box3d.style.width = w + 'px';
+      box3d.style.height = h + 'px';
+
+      const faces = [
+        { transform: `rotateY(0deg) translateZ(${d/2}px)`, w, h },
+        { transform: `rotateY(180deg) translateZ(${d/2}px)`, w, h },
+        { transform: `rotateY(90deg) translateZ(${w/2}px)`, w: d, h },
+        { transform: `rotateY(-90deg) translateZ(${w/2}px)`, w: d, h },
+        { transform: `rotateX(90deg) translateZ(${h/2}px)`, w, h: d },
+        { transform: `rotateX(-90deg) translateZ(${h/2}px)`, w, h: d }
+      ];
+
+      for (const f of faces) {
+        const face = document.createElement('div');
+        face.className = 'box-face';
+        face.style.width = f.w + 'px';
+        face.style.height = f.h + 'px';
+        face.style.transform = `translate(-50%, -50%) ${f.transform}`;
+        face.style.backgroundColor = color;
+        box3d.appendChild(face);
+      }
+    }
+
+    function updatePreview() {
+      const length = parseInt(document.getElementById('boxLength').value) || 50;
+      const width = parseInt(document.getElementById('boxWidth').value) || 50;
+      const height = parseInt(document.getElementById('boxHeight').value) || 50;
+      const color = document.getElementById('boxColor').value || '#deb887';
+      update3DBox(length, height, width, color);
+    }
+
+    function loadBoxes() {
+      const boxes = JSON.parse(localStorage.getItem('boxes') || '[]');
+      list.innerHTML = '<h2 class="main-title mt-5">Defined Boxes</h2>';
+      boxes.forEach((box, i) => {
+        const item = document.createElement('div');
+        item.className = 'box-item';
+        item.setAttribute("onclick", "editBox(" + i + ")");
+        item.style.borderLeft = '5px solid ' + box.color;
+        item.innerHTML = `<div><strong>${box.name}</strong><br>
+                          ${box.length} x ${box.width} x ${box.height} cm<br>
+                          <span style="color:${box.color}">${box.color}</span><br>Weight: ${box.weight}kg<br>Stackable: ${box.stackable}<br>Any Direction: ${box.anyDirection}</div>
+                          <div style="display:flex; gap:10px;">
+                            <button onclick="editBox(${i})" class="calc-btn">Edit</button>
+                            <button onclick="deleteBox(${i})" class="calc-btn calc-btn-main">Delete</button>
+                          </div>`;
+        list.appendChild(item);
+      });
+    }
+
+    function deleteBox(index) {
+      const boxes = JSON.parse(localStorage.getItem('boxes') || '[]');
+      if (index >= 0) {
+        boxes.splice(index, 1);
+        localStorage.setItem('boxes', JSON.stringify(boxes));
+        loadBoxes();
+      }
+    }
+
+    function editBox(index) {
+      const boxes = JSON.parse(localStorage.getItem('boxes') || '[]');
+      const box = boxes[index];
+      document.getElementById('boxIndex').value = index;
+      document.getElementById('boxName').value = box.name;
+      document.getElementById('boxLength').value = box.length;
+      document.getElementById('boxWidth').value = box.width;
+      document.getElementById('boxHeight').value = box.height;
+      document.getElementById('boxColor').value = box.color;
+document.getElementById('boxWeight').value = box.weight || '';
+document.querySelector(`input[name='stackable'][value='${box.stackable || "yes"}']`).checked = true;
+document.querySelector(`input[name='anyDirection'][value='${box.anyDirection || "yes"}']`).checked = true;
+      updatePreview();
+    }
+
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const name = document.getElementById('boxName').value;
+      const length = document.getElementById('boxLength').value;
+      const width = document.getElementById('boxWidth').value;
+      const height = document.getElementById('boxHeight').value;
+      const color = document.getElementById('boxColor').value;
+      const index = parseInt(document.getElementById('boxIndex').value);
+
+      const weight = parseFloat(document.getElementById('boxWeight').value) || 0;
+const stackable = document.querySelector('input[name="stackable"]:checked').value;
+const anyDirection = document.querySelector('input[name="anyDirection"]:checked').value;
+const newBox = { name, length, width, height, color, weight, stackable, anyDirection };
+      const boxes = JSON.parse(localStorage.getItem('boxes') || '[]');
+
+      if (!isNaN(index) && index >= 0) {
+        boxes[index] = newBox;
+      } else {
+        boxes.push(newBox);
+      }
+
+      localStorage.setItem('boxes', JSON.stringify(boxes));
+      form.reset();
+      document.getElementById('boxIndex').value = -1;
+      document.getElementById('boxColor').value = '#deb887';
+      updatePreview();
+      loadBoxes();
+    });
+
+    window.addEventListener('DOMContentLoaded', function() {
+      loadBoxes();
+      updatePreview();
+    });
+  </script>
+</body>
+</html>
