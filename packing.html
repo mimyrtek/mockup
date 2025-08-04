@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Box Packer for Europallet (Minimized Stacking)</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .box-input { margin: 10px 0; border: 1px solid #ccc; padding: 10px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .error { color: red; }
+        #threejs-container { width: 800px; height: 600px; margin-top: 20px; border: 1px solid #ccc; position: relative; }
+        #error-message { position: absolute; top: 10px; left: 10px; color: red; }
+    </style>
+    <!-- Three.js and OrbitControls CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <h1>3D Box Packer for Europallet (Minimized Stacking)</h1>
+    
+    <h2>Pallet Dimensions (mm)</h2>
+    <label>Width: <input type="number" id="pallet-width" value="1200" min="1"></label><br>
+    <label>Depth: <input type="number" id="pallet-depth" value="800" min="1"></label><br>
+    <label>Height: <input type="number" id="pallet-height" value="2000" min="1"></label><br>
+    <label>Max Weight (kg): <input type="number" id="pallet-max-weight" value="10000" min="0"></label><br>
+    
+    <h2>Boxes</h2>
+    <button onclick="addBoxInput()">Add Box Type</button>
+    <div id="boxes-container"></div>
+    
+    <button onclick="calculatePacking()" style="margin: 20px 0;">Calculate Packing</button>
+    
+    <h2>Results</h2>
+    <div id="results"></div>
+    
+    <h2>3D Visualization</h2>
+    <div id="threejs-container"><div id="error-message"></div></div>
+    
+    <script>
+        let boxCount = 0;
+        let scene, camera, renderer, controls;
+
+        // Add input fields for a new box type
+        function addBoxInput() {
+            boxCount++;
+            const container = document.getElementById('boxes-container');
+            const div = document.createElement('div');
+            div.className = 'box-input';
+            div.innerHTML = `
+                <label>Name: <input type="text" id="box-name-${boxCount}" value="Box ${boxCount}"></label><br>
+                <label>Width (mm): <input type="number" id="box-width-${boxCount}" value="100" min="1"></label><br>
+                <label>Height (mm): <input type="number" id="box-height-${boxCount}" value="100" min="1"></label><br>
+                <label>Depth (mm): <input type="number" id="box-depth-${boxCount}" value="100" min="1"></label><br>
+                <label>Weight (kg): <input type="number" id="box-weight-${boxCount}" value="1" min="0"></label><br>
+                <label>Quantity: <input type="number" id="box-quantity-${boxCount}" value="1" min="1"></label>
+            `;
+            container.appendChild(div);
+        }
+
+        // 3D bin packing with minimized stacking (prefer lower heights)
+        function packBoxes(pallet, boxes) {
+            const result = { items: [], unfit: [] };
+            let totalWeight = 0;
+            let space = [{ x: 0, y: 0, z: 0, w: pallet.w, h: pallet.h, d: pallet.d }]; // Available spaces
+
+            // Sort boxes by base area (largest first)
+            boxes.sort((a, b) => (b.w * b.d) - (a.w * a.d));
+
+            for (const box of boxes) {
+                let placed = false;
+                // Rotations: only swap width and depth (keep height vertical)
+                const rotations = [
+                    [box.w, box.h, box.d],
+                    [box.d, box.h, box.w]
+                ];
+
+                // Sort spaces by y ascending to prefer lower heights
+                space.sort((a, b) => a.y - b.y);
+
+                for (let i = 0; i < space.length && !placed; i++) {
+                    const sp = space[i];
+                    for (const [rw, rh, rd] of rotations) {
+                        if (rw <= sp.w && rh <= sp.h && rd <= sp.d && totalWeight + box.weight <= pallet.maxWeight) {
+                            // Place box
+                            result.items.push({
+                                name: box.name,
+                                position: [sp.x, sp.y, sp.z],
+                                dimension: [rw, rh, rd],
+                                weight: box.weight
+                            });
+                            totalWeight += box.weight;
+
+                            // Update spaces
+                            space.splice(i, 1);
+                            if (sp.w - rw > 0) space.push({ x: sp.x + rw, y: sp.y, z: sp.z, w: sp.w - rw, h: rh, d: rd }); // Right
+                            if (sp.h - rh > 0) space.push({ x: sp.x, y: sp.y + rh, z: sp.z, w: sp.w, h: sp.h - rh, d: rd }); // Above
+                            if (sp.d - rd > 0) space.push({ x: sp.x, y: sp.y, z: sp.z + rd, w: sp.w, h: sp.h, d: sp.d - rd }); // Front
+                            placed = true;
+                            break;
+                        }
+                    }
+                }
+                if (!placed) result.unfit.push(box);
+            }
+            return result;
+        }
+
+        // Initialize Three.js scene
+        function initThreeJS(pallet) {
+            const container = document.getElementById('threejs-container');
+            const errorMessage = document.getElementById('error-message');
+            errorMessage.innerHTML = '';
+
+            try {
+                if (!window.THREE) {
+                    throw new Error('Three.js library failed to load. Check CDN or internet connection.');
+                }
+
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0xdddddd);
+
+                camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 10000);
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(container.clientWidth, container.clientHeight);
+                container.appendChild(renderer.domElement);
+
+                controls = new THREE.OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.target.set(pallet.w / 2, pallet.h / 2, pallet.d / 2);
+
+                const palletGeometry = new THREE.BoxGeometry(pallet.w, 50, pallet.d);
+                const palletMaterial = new THREE.MeshBasicMaterial({ color: 0xaaaaaa, wireframe: true });
+                const palletMesh = new THREE.Mesh(palletGeometry, palletMaterial);
+                palletMesh.position.set(pallet.w / 2, 25, pallet.d / 2);
+                scene.add(palletMesh);
+
+                const gridHelper = new THREE.GridHelper(Math.max(pallet.w, pallet.d), 10, 0x000000, 0x888888);
+                gridHelper.position.set(pallet.w / 2, 0, pallet.d / 2);
+                scene.add(gridHelper);
+
+                const axesHelper = new THREE.AxesHelper(Math.max(pallet.w, pallet.d));
+                scene.add(axesHelper);
+
+                const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
+                scene.add(ambientLight);
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(pallet.w, pallet.h * 2, pallet.d);
+                scene.add(directionalLight);
+
+                const maxDim = Math.max(pallet.w, pallet.h, pallet.d);
+                camera.position.set(pallet.w / 2, pallet.h / 2, pallet.d * 1.5 + maxDim);
+                camera.lookAt(pallet.w / 2, pallet.h / 2, pallet.d / 2);
+
+                animate();
+            } catch (e) {
+                console.error('Three.js Error:', e.message);
+                errorMessage.innerHTML = 'Error initializing 3D visualization: ' + e.message;
+            }
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Add boxes to the 3D scene
+        function addBoxesToScene(items) {
+            items.forEach((item, index) => {
+                const geometry = new THREE.BoxGeometry(item.dimension[0], item.dimension[1], item.dimension[2]);
+                const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 + (index * 0x003300), opacity: 0.8, transparent: true });
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.set(
+                    item.position[0] + item.dimension[0] / 2,
+                    item.position[1] + item.dimension[1] / 2,
+                    item.position[2] + item.dimension[2] / 2
+                );
+                scene.add(mesh);
+
+                const edges = new THREE.EdgesGeometry(geometry);
+                const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000 }));
+                line.position.copy(mesh.position);
+                scene.add(line);
+            });
+        }
+
+        // Calculate packing and display results
+        function calculatePacking() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '';
+            const container = document.getElementById('threejs-container');
+            container.innerHTML = '<div id="error-message"></div>';
+
+            // Get pallet dimensions
+            const palletWidth = parseFloat(document.getElementById('pallet-width').value);
+            const palletHeight = parseFloat(document.getElementById('pallet-height').value);
+            const palletDepth = parseFloat(document.getElementById('pallet-depth').value);
+            const palletMaxWeight = parseFloat(document.getElementById('pallet-max-weight').value);
+
+            // Validate pallet inputs
+            if (!palletWidth || !palletHeight || !palletDepth || !palletMaxWeight || palletWidth <= 0 || palletHeight <= 0 || palletDepth <= 0 || palletMaxWeight < 0) {
+                resultsDiv.innerHTML = '<p class="error">Error: Invalid pallet dimensions or weight.</p>';
+                return;
+            }
+
+            const pallet = { w: palletWidth, h: palletHeight, d: palletDepth, maxWeight: palletMaxWeight };
+            const boxes = [];
+
+            // Get box inputs
+            for (let i = 1; i <= boxCount; i++) {
+                const name = document.getElementById(`box-name-${i}`).value || `Box ${i}`;
+                const width = parseFloat(document.getElementById(`box-width-${i}`).value);
+                const height = parseFloat(document.getElementById(`box-height-${i}`).value);
+                const depth = parseFloat(document.getElementById(`box-depth-${i}`).value);
+                const weight = parseFloat(document.getElementById(`box-weight-${i}`).value);
+                const quantity = parseInt(document.getElementById(`box-quantity-${i}`).value);
+
+                if (!width || !height || !depth || !weight || !quantity || width <= 0 || height <= 0 || depth <= 0 || weight < 0 || quantity <= 0) {
+                    resultsDiv.innerHTML = '<p class="error">Error: Invalid dimensions, weight, or quantity for ' + name + '.</p>';
+                    return;
+                }
+
+                for (let q = 0; q < quantity; q++) {
+                    boxes.push({ name: `${name} #${q + 1}`, w: width, h: height, d: depth, weight });
+                }
+            }
+
+            if (boxes.length === 0) {
+                resultsDiv.innerHTML = '<p class="error">Error: No boxes added.</p>';
+                return;
+            }
+
+            // Run packing
+            const result = packBoxes(pallet, boxes);
+
+            // Display text results
+            if (result.unfit.length > 0) {
+                resultsDiv.innerHTML += `<p class="error">Not all boxes fit! Unfit boxes: ${result.unfit.map(b => b.name).join(', ')}</p>`;
+            } else {
+                resultsDiv.innerHTML += '<p style="color: green;">All boxes fit on the pallet.</p>';
+            }
+
+            const usedVolume = result.items.reduce((acc, item) => acc + (item.dimension[0] * item.dimension[1] * item.dimension[2]), 0);
+            const palletVolume = pallet.w * pallet.h * pallet.d;
+            const efficiency = ((usedVolume / palletVolume) * 100).toFixed(2);
+            resultsDiv.innerHTML += `<p>Space Utilization: ${efficiency}%</p>`;
+
+            if (result.items.length > 0) {
+                let table = '<table><tr><th>Box Name</th><th>Position (x, y, z)</th><th>Dimensions (w, h, d) after rotation</th></tr>';
+                result.items.forEach(item => {
+                    table += `<tr><td>${item.name}</td><td>(${item.position[0]}, ${item.position[1]}, ${item.position[2]})</td><td>(${item.dimension[0]}, ${item.dimension[1]}, ${item.dimension[2]})</td></tr>`;
+                });
+                table += '</table>';
+                resultsDiv.innerHTML += table;
+            }
+
+            // Initialize 3D scene and add boxes
+            initThreeJS(pallet);
+            addBoxesToScene(result.items);
+        }
+
+        // Add one box input by default
+        addBoxInput();
+    </script>
+</body>
+</html>
