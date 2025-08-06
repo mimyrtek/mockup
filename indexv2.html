@@ -69,13 +69,13 @@
                     [box.d, box.h, box.w]  // 90-degree horizontal rotation
                 ];
 
-                // Sort spaces by y ascending to prioritize lowest height
-                spaces.sort((a, b) => a.y - b.y);
+                // Sort spaces by y ascending, then by volume to prioritize lower and larger spaces
+                spaces.sort((a, b) => a.y === b.y ? (b.w * b.h * b.d) - (a.w * a.h * a.d) : a.y - b.y);
 
                 // Step 1: Try to place on base layer (y=0)
                 let baseSpaces = spaces.filter(sp => sp.y === 0);
-                for (let j = baseSpaces.length - 1; j >= 0 && !placed; j--) {
-                    const sp = baseSpaces[j];
+                for (let i = 0; i < baseSpaces.length && !placed; i++) {
+                    const sp = baseSpaces[i];
                     for (const [rw, rh, rd] of rotations) {
                         if (rw <= sp.w && rh <= sp.h && rd <= sp.d && totalWeight + box.weight <= pallet.maxWeight) {
                             // Check for overlap with existing items
@@ -104,10 +104,11 @@
                                 // Update spaces
                                 const spaceIndex = spaces.indexOf(sp);
                                 spaces.splice(spaceIndex, 1);
-                                if (sp.w - rw > 0) spaces.push({ x: sp.x + rw, y: sp.y, z: sp.z, w: sp.w - rw, h: pallet.h, d: sp.d }); // Right
-                                if (sp.d - rd > 0) spaces.push({ x: sp.x, y: sp.y, z: sp.z + rd, w: sp.w, h: pallet.h, d: sp.d - rd }); // Front
+                                if (sp.w - rw > 0) spaces.push({ x: sp.x + rw, y: sp.y, z: sp.z, w: sp.w - rw, h: sp.h, d: sp.d }); // Right
+                                if (sp.d - rd > 0) spaces.push({ x: sp.x, y: sp.y, z: sp.z + rd, w: sp.w, h: sp.h, d: sp.d - rd }); // Front
                                 if (sp.h - rh > 0) spaces.push({ x: sp.x, y: sp.y + rh, z: sp.z, w: rw, h: sp.h - rh, d: rd }); // Above
                                 placed = true;
+                                console.log(`Placed ${box.name} on base layer at (${sp.x}, ${sp.y}, ${sp.z}) with dimensions (${rw}, ${rh}, ${rd})`);
                                 break;
                             }
                         }
@@ -117,29 +118,29 @@
                 // Step 2: If not placed on base layer, try stacking on top of existing boxes
                 if (!placed) {
                     let validSpaces = [];
-                    // Generate valid stacking spaces from tops of placed boxes
+                    // Generate stacking spaces above all placed boxes
                     result.items.forEach(item => {
                         const [x, y, z] = item.position;
                         const [w, h, d] = item.dimension;
-                        // Add space directly above the box if it fits within pallet height
                         if (y + h + box.h <= pallet.h) {
                             rotations.forEach(([rw, rh, rd]) => {
-                                if (rw <= w && rd <= d) {
+                                // Relax footprint constraint: allow stacking if box fits within pallet boundaries
+                                if (x + rw <= pallet.w && z + rd <= pallet.d) {
                                     validSpaces.push({
                                         x: x,
                                         y: y + h,
                                         z: z,
-                                        w: w,
+                                        w: Math.min(w, pallet.w - x), // Limit to pallet boundary
                                         h: pallet.h - (y + h),
-                                        d: d
+                                        d: Math.min(d, pallet.d - z)  // Limit to pallet boundary
                                     });
                                 }
                             });
                         }
                     });
 
-                    // Sort valid spaces by y ascending to prefer lower heights
-                    validSpaces.sort((a, b) => a.y - b.y);
+                    // Sort valid spaces by y ascending, then by volume
+                    validSpaces.sort((a, b) => a.y === b.y ? (b.w * b.h * b.d) - (a.w * a.h * a.d) : a.y - b.y);
 
                     for (let i = 0; i < validSpaces.length && !placed; i++) {
                         const sp = validSpaces[i];
@@ -176,6 +177,7 @@
                                     });
                                     if (sp.h - rh > 0) spaces.push({ x: sp.x, y: sp.y + rh, z: sp.z, w: rw, h: sp.h - rh, d: rd }); // Above
                                     placed = true;
+                                    console.log(`Placed ${box.name} on stack at (${sp.x}, ${sp.y}, ${sp.z}) with dimensions (${rw}, ${rh}, ${rd})`);
                                     break;
                                 }
                             }
@@ -184,31 +186,175 @@
                 }
 
                 if (!placed) {
-                    console.log(`Unfit box: ${box.name} - dimensions (${box.w}, ${box.h}, ${box.d}), weight ${box.weight}`);
+                    console.log(`Unfit box: ${box.name} - dimensions (${box.w}, ${box.h}, ${box.d}), weight ${box.weight}. Available spaces:`, validSpaces);
                     result.unfit.push(box);
-                }
-            }
-
-            // Check for overlaps after all placements
-            const items = result.items;
-            for (let k = 0; k < items.length; k++) {
-                for (let m = k + 1; m < items.length; m++) {
-                    const item1 = items[k];
-                    const item2 = items[m];
-                    const [x1, y1, z1] = item1.position;
-                    const [w1, h1, d1] = item1.dimension;
-                    const [x2, y2, z2] = item2.position;
-                    const [w2, h2, d2] = item2.dimension;
-                    if (!(x1 + w1 <= x2 || x1 >= x2 + w2 ||
-                          y1 + h1 <= y2 || y1 >= y2 + h2 ||
-                          z1 + d1 <= z2 || z1 >= z2 + d2)) {
-                      console.log(`Overlap detected between ${item1.name} and ${item2.name}`);
-                    }
                 }
             }
 
             console.log(`Placed ${result.items.length} boxes, ${result.unfit.length} boxes unfit`);
             return result;
+        }
+
+        // Initialize Three.js scene
+        function initThreeJS(pallet) {
+            const container = document.getElementById('threejs-container');
+            const errorMessage = document.getElementById('error-message');
+            errorMessage.innerHTML = '';
+
+            try {
+                if (!window.THREE) {
+                    throw new Error('Three.js library failed to load. Check CDN or internet connection.');
+                }
+
+                // Clear previous scene if it exists
+                if (scene) {
+                    while (scene.children.length > 0) {
+                        scene.remove(scene.children[0]);
+                    }
+                } else {
+                    scene = new THREE.Scene();
+                }
+                scene.background = new THREE.Color(0xdddddd);
+
+                // Create new renderer, only remove old one if it exists and is a child
+                if (renderer && renderer.domElement && container.contains(renderer.domElement)) {
+                    container.removeChild(renderer.domElement);
+                    renderer.dispose();
+                }
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(container.clientWidth, container.clientHeight);
+                container.appendChild(renderer.domElement);
+
+                camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 10000);
+                controls = new THREE.OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.target.set(pallet.w / 2, pallet.h / 2, pallet.d / 2);
+
+                const palletGeometry = new THREE.BoxGeometry(pallet.w, 50, pallet.d);
+                const palletMaterial = new THREE.MeshBasicMaterial({ color: 0xaaaaaa, wireframe: true });
+                const palletMesh = new THREE.Mesh(palletGeometry, palletMaterial);
+                palletMesh.position.set(pallet.w / 2, 25, pallet.d / 2);
+                scene.add(palletMesh);
+
+                const gridHelper = new THREE.GridHelper(Math.max(pallet.w, pallet.d), 10, 0x000000, 0x888888);
+                gridHelper.position.set(pallet.w / 2, 0, pallet.d / 2);
+                scene.add(gridHelper);
+
+                const axesHelper = new THREE.AxesHelper(Math.max(pallet.w, pallet.d));
+                scene.add(axesHelper);
+
+                const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
+                scene.add(ambientLight);
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(pallet.w, pallet.h * 2, pallet.d);
+                scene.add(directionalLight);
+
+                const maxDim = Math.max(pallet.w, pallet.h, pallet.d);
+                camera.position.set(pallet.w / 2, pallet.h / 2, pallet.d * 1.5 + maxDim);
+                camera.lookAt(pallet.w / 2, pallet.h / 2, pallet.d / 2);
+
+                animate();
+            } catch (e) {
+                console.error('Three.js Error:', e.message);
+                errorMessage.innerHTML = 'Error initializing 3D visualization: ' + e.message;
+            }
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Add boxes to the 3D scene with user-selected colors
+        function addBoxesToScene(items) {
+            items.forEach((item) => {
+                const geometry = new THREE.BoxGeometry(item.dimension[0], item.dimension[1], item.dimension[2]);
+                const material = new THREE.MeshBasicMaterial({
+                    color: item.color,
+                    opacity: 0.8,
+                    transparent: true
+                });
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.set(
+                    item.position[0] + item.dimension[0] / 2,
+                    item.position[1] + item.dimension[1] / 2,
+                    item.position[2] + item.dimension[2] / 2
+                );
+                scene.add(mesh);
+
+                const edges = new THREE.EdgesGeometry(geometry);
+                const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000 }));
+                line.position.copy(mesh.position);
+                scene.add(line);
+            });
+        }
+
+        // Add input fields for a new box type, including color dropdown, remove and rotate buttons
+        function addBoxInput() {
+            boxCount++;
+            const container = document.getElementById('boxes-container');
+            const div = document.createElement('div');
+            div.className = 'box-input';
+            div.id = `box-input-${boxCount}`;
+            div.innerHTML = `
+                <label>Name: <input type="text" id="box-name-${boxCount}" value="Box ${boxCount}"></label><br>
+                <label>Width (mm): <input type="number" id="box-width-${boxCount}" value="350" min="1"></label><br>
+                <label>Height (mm): <input type="number" id="box-height-${boxCount}" value="250" min="1"></label><br>
+                <label>Depth (mm): <input type="number" id="box-depth-${boxCount}" value="400" min="1"></label><br>
+                <label>Weight (kg): <input type="number" id="box-weight-${boxCount}" value="1" min="0"></label><br>
+                <label>Quantity: <input type="number" id="box-quantity-${boxCount}" value="1" min="1"></label><br>
+                <label>Color: 
+                    <select id="box-color-${boxCount}">
+                        <option value="#ff0000">Red</option>
+                        <option value="#00ff00">Green</option>
+                        <option value="#0000ff">Blue</option>
+                        <option value="#ffff00">Yellow</option>
+                        <option value="#ff00ff">Magenta</option>
+                        <option value="#00ffff">Cyan</option>
+                        <option value="#ffa500">Orange</option>
+                        <option value="#800080">Purple</option>
+                    </select>
+                </label><br>
+                <button class="rotate-button" onclick="rotateBox(${boxCount})">Rotate Horizontal</button>
+                <button class="remove-button" onclick="removeBoxInput(${boxCount})">Remove Box Type</button>
+            `;
+            container.appendChild(div);
+
+            // Add event listeners to new inputs
+            const inputs = div.querySelectorAll('input, select');
+            inputs.forEach(input => {
+                if (input.tagName === 'SELECT') {
+                    input.addEventListener('change', debouncedCalculate);
+                } else {
+                    input.addEventListener('input', debouncedCalculate);
+                }
+            });
+
+            // Trigger initial packing
+            calculatePacking();
+        }
+
+        // Rotate box horizontally (swap width and depth)
+        function rotateBox(id) {
+            const widthInput = document.getElementById(`box-width-${id}`);
+            const depthInput = document.getElementById(`box-depth-${id}`);
+            if (widthInput && depthInput) {
+                const temp = widthInput.value;
+                widthInput.value = depthInput.value;
+                depthInput.value = temp;
+                calculatePacking(); // Trigger packing after rotation
+            }
+        }
+
+        // Remove a box input
+        function removeBoxInput(id) {
+            const boxInput = document.getElementById(`box-input-${id}`);
+            if (boxInput) {
+                boxInput.remove();
+                calculatePacking(); // Trigger packing after removal
+            }
         }
 
         // Calculate packing and display results
@@ -267,7 +413,7 @@
             if (result.unfit.length > 0) {
                 resultsDiv.innerHTML += `<p class="error">Not all boxes fit! Unfit boxes: ${result.unfit.map(b => b.name).join(', ')}</p>`;
             } else {
-                resultsDiv.innerHTML += '<p style="color: green;">All boxes fit on the pallet.</p>';
+                resultsDiv.innerHTML += `<p style="color: green;">All boxes fit on the pallet.</p>`;
             }
 
             const usedVolume = result.items.reduce((acc, item) => acc + (item.dimension[0] * item.dimension[1] * item.dimension[2]), 0);
@@ -280,10 +426,12 @@
             addBoxesToScene(result.items);
         }
 
+        const debouncedCalculate = debounce(calculatePacking, 300);
+
         // Add event listeners to pallet inputs
         const palletInputs = document.querySelectorAll('#pallet-width, #pallet-depth, #pallet-height, #pallet-max-weight');
         palletInputs.forEach(input => {
-            input.addEventListener('input', debounce(calculatePacking, 300));
+            input.addEventListener('input', debouncedCalculate);
         });
 
         // Add one box input by default
@@ -291,4 +439,3 @@
     </script>
 </body>
 </html>
-</xaiArtifact>
