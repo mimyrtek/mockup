@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Box Packer for Europallet (Minimized Stacking)</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .box-input { margin: 10px 0; border: 1px solid #ccc; padding: 10px; }
+        .error { color: red; }
+        #threejs-container { width: 800px; height: 600px; margin-top: 20px; border: 1px solid #ccc; position: relative; }
+        #error-message { position: absolute; top: 10px; left: 10px; color: red; }
+        .remove-button { margin-top: 10px; background-color: #ff4444; color: white; border: none; padding: 5px 10px; cursor: pointer; }
+        .remove-button:hover { background-color: #cc0000; }
+        .rotate-button { margin-top: 10px; background-color: #4444ff; color: white; border: none; padding: 5px 10px; cursor: pointer; }
+        .rotate-button:hover { background-color: #0000cc; }
+    </style>
+    <!-- Three.js and OrbitControls CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <h1>3D Box Packer for Europallet (Minimized Stacking)</h1>
+    
+    <h2>Pallet Dimensions (mm)</h2>
+    <label>Width: <input type="number" id="pallet-width" value="1200" min="1"></label><br>
+    <label>Depth: <input type="number" id="pallet-depth" value="800" min="1"></label><br>
+    <label>Height: <input type="number" id="pallet-height" value="2000" min="1"></label><br>
+    <label>Max Weight (kg): <input type="number" id="pallet-max-weight" value="10000" min="0"></label><br>
+    
+    <h2>Boxes</h2>
+    <button onclick="addBoxInput()">Add Box Type</button>
+    <div id="boxes-container"></div>
+    
+    <button onclick="calculatePacking()" style="margin: 20px 0;">Calculate Packing</button>
+    
+    <h2>Results</h2>
+    <div id="results"></div>
+    
+    <h2>3D Visualization</h2>
+    <div id="threejs-container"><div id="error-message"></div></div>
+    
+    <script>
+        let boxCount = 0;
+        let scene, camera, renderer, controls;
+        let debounceTimeout;
+
+        // Debounce function to limit rapid recalculations
+        function debounce(func, wait) {
+            return function executedFunction(...args) {
+                clearTimeout(debounceTimeout);
+                debounceTimeout = setTimeout(() => func(...args), wait);
+            };
+        }
+
+        // 3D bin packing with minimized stacking (horizontal rotations allowed, stack only on boxes)
+        function packBoxes(pallet, boxes) {
+            const result = { items: [], unfit: [] };
+            let totalWeight = 0;
+            let spaces = [{ x: 0, y: 0, z: 0, w: pallet.w, h: pallet.h, d: pallet.d }]; // Available spaces
+
+            // Sort boxes by base area (largest first)
+            boxes.sort((a, b) => (b.w * b.d) - (a.w * a.d));
+
+            for (const box of boxes) {
+                let placed = false;
+                const rotations = [
+                    [box.w, box.h, box.d], // Original
+                    [box.d, box.h, box.w]  // 90-degree horizontal rotation
+                ];
+
+                // Sort spaces by y ascending to prioritize lowest height
+                spaces.sort((a, b) => a.y - b.y);
+
+                // Step 1: Try to place on base layer (y=0)
+                let baseSpaces = spaces.filter(sp => sp.y === 0);
+                for (let j = baseSpaces.length - 1; j >= 0 && !placed; j--) {
+                    const sp = baseSpaces[j];
+                    for (const [rw, rh, rd] of rotations) {
+                        if (rw <= sp.w && rh <= sp.h && rd <= sp.d && totalWeight + box.weight <= pallet.maxWeight) {
+                            // Check for overlap with existing items
+                            let overlaps = false;
+                            for (const item of result.items) {
+                                const [ix, iy, iz] = item.position;
+                                const [iw, ih, id] = item.dimension;
+                                if (!(sp.x + rw <= ix || sp.x >= ix + iw ||
+                                      sp.y + rh <= iy || sp.y >= iy + ih ||
+                                      sp.z + rd <= iz || sp.z >= iz + id)) {
+                                    overlaps = true;
+                                    break;
+                                }
+                            }
+                            if (!overlaps) {
+                                // Place box on base layer
+                                result.items.push({
+                                    name: box.name,
+                                    position: [sp.x, sp.y, sp.z],
+                                    dimension: [rw, rh, rd],
+                                    weight: box.weight,
+                                    color: box.color
+                                });
+                                totalWeight += box.weight;
+
+                                // Update spaces
+                                const spaceIndex = spaces.indexOf(sp);
+                                spaces.splice(spaceIndex, 1);
+                                if (sp.w - rw > 0) spaces.push({ x: sp.x + rw, y: sp.y, z: sp.z, w: sp.w - rw, h: pallet.h, d: sp.d }); // Right
+                                if (sp.d - rd > 0) spaces.push({ x: sp.x, y: sp.y, z: sp.z + rd, w: sp.w, h: pallet.h, d: sp.d - rd }); // Front
+                                if (sp.h - rh > 0) spaces.push({ x: sp.x, y: sp.y + rh, z: sp.z, w: rw, h: sp.h - rh, d: rd }); // Above
+                                placed = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Step 2: If not placed on base layer, try stacking on top of existing boxes
+                if (!placed) {
+                    let validSpaces = [];
+                    // Generate valid stacking spaces from tops of placed boxes
+                    result.items.forEach(item => {
+                        const [x, y, z] = item.position;
+                        const [w, h, d] = item.dimension;
+                        // Add space directly above the box if it fits within pallet height
+                        if (y + h + box.h <= pallet.h) {
+                            rotations.forEach(([rw, rh, rd]) => {
+                                if (rw <= w && rd <= d) {
+                                    validSpaces.push({
+                                        x: x,
+                                        y: y + h,
+                                        z: z,
+                                        w: w,
+                                        h: pallet.h - (y + h),
+                                        d: d
+                                    });
+                                }
+                            });
+                        }
+                    });
+
+                    // Sort valid spaces by y ascending to prefer lower heights
+                    validSpaces.sort((a, b) => a.y - b.y);
+
+                    for (let i = 0; i < validSpaces.length && !placed; i++) {
+                        const sp = validSpaces[i];
+                        for (const [rw, rh, rd] of rotations) {
+                            if (rw <= sp.w && rh <= sp.h && rd <= sp.d && totalWeight + box.weight <= pallet.maxWeight) {
+                                // Check for overlap with existing items
+                                let overlaps = false;
+                                for (const item of result.items) {
+                                    const [ix, iy, iz] = item.position;
+                                    const [iw, ih, id] = item.dimension;
+                                    if (!(sp.x + rw <= ix || sp.x >= ix + iw ||
+                                          sp.y + rh <= iy || sp.y >= iy + ih ||
+                                          sp.z + rd <= iz || sp.z >= iz + id)) {
+                                        overlaps = true;
+                                        break;
+                                    }
+                                }
+                                if (!overlaps) {
+                                    // Place box on top of another box
+                                    result.items.push({
+                                        name: box.name,
+                                        position: [sp.x, sp.y, sp.z],
+                                        dimension: [rw, rh, rd],
+                                        weight: box.weight,
+                                        color: box.color
+                                    });
+                                    totalWeight += box.weight;
+
+                                    // Update spaces: remove overlapping spaces and add new space above
+                                    spaces = spaces.filter(s => {
+                                        return (s.x + s.w <= sp.x || sp.x + rw <= s.x ||
+                                                s.z + s.d <= sp.z || sp.z + rd <= s.z ||
+                                                s.y + s.h <= sp.y || sp.y + rh <= s.y);
+                                    });
+                                    if (sp.h - rh > 0) spaces.push({ x: sp.x, y: sp.y + rh, z: sp.z, w: rw, h: sp.h - rh, d: rd }); // Above
+                                    placed = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!placed) {
+                    console.log(`Unfit box: ${box.name} - dimensions (${box.w}, ${box.h}, ${box.d}), weight ${box.weight}`);
+                    result.unfit.push(box);
+                }
+            }
+
+            // Check for overlaps after all placements
+            const items = result.items;
+            for (let k = 0; k < items.length; k++) {
+                for (let m = k + 1; m < items.length; m++) {
+                    const item1 = items[k];
+                    const item2 = items[m];
+                    const [x1, y1, z1] = item1.position;
+                    const [w1, h1, d1] = item1.dimension;
+                    const [x2, y2, z2] = item2.position;
+                    const [w2, h2, d2] = item2.dimension;
+                    if (!(x1 + w1 <= x2 || x1 >= x2 + w2 ||
+                          y1 + h1 <= y2 || y1 >= y2 + h2 ||
+                          z1 + d1 <= z2 || z1 >= z2 + d2)) {
+                      console.log(`Overlap detected between ${item1.name} and ${item2.name}`);
+                    }
+                }
+            }
+
+            console.log(`Placed ${result.items.length} boxes, ${result.unfit.length} boxes unfit`);
+            return result;
+        }
+
+        // Calculate packing and display results
+        function calculatePacking() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '';
+            const container = document.getElementById('threejs-container');
+            container.innerHTML = '<div id="error-message"></div>';
+
+            // Get pallet dimensions
+            const palletWidth = parseFloat(document.getElementById('pallet-width').value);
+            const palletHeight = parseFloat(document.getElementById('pallet-height').value);
+            const palletDepth = parseFloat(document.getElementById('pallet-depth').value);
+            const palletMaxWeight = parseFloat(document.getElementById('pallet-max-weight').value);
+
+            // Validate pallet inputs
+            if (!palletWidth || !palletHeight || !palletDepth || !palletMaxWeight || palletWidth <= 0 || palletHeight <= 0 || palletDepth <= 0 || palletMaxWeight < 0) {
+                resultsDiv.innerHTML = '<p class="error">Error: Invalid pallet dimensions or weight.</p>';
+                return;
+            }
+
+            const pallet = { w: palletWidth, h: palletHeight, d: palletDepth, maxWeight: palletMaxWeight };
+            const boxes = [];
+
+            // Get box inputs
+            for (let i = 1; i <= boxCount; i++) {
+                const nameInput = document.getElementById(`box-name-${i}`);
+                if (!nameInput) continue; // Skip if box input was removed
+                const name = nameInput.value || `Box ${i}`;
+                const width = parseFloat(document.getElementById(`box-width-${i}`).value);
+                const height = parseFloat(document.getElementById(`box-height-${i}`).value);
+                const depth = parseFloat(document.getElementById(`box-depth-${i}`).value);
+                const weight = parseFloat(document.getElementById(`box-weight-${i}`).value);
+                const quantity = parseInt(document.getElementById(`box-quantity-${i}`).value);
+                const color = document.getElementById(`box-color-${i}`).value;
+
+                if (!width || !height || !depth || !weight || !quantity || width <= 0 || height <= 0 || depth <= 0 || weight < 0 || quantity <= 0) {
+                    resultsDiv.innerHTML = '<p class="error">Error: Invalid dimensions, weight, or quantity for ' + name + '.</p>';
+                    return;
+                }
+
+                for (let q = 0; q < quantity; q++) {
+                    boxes.push({ name: `${name} #${q + 1}`, w: width, h: height, d: depth, weight, color });
+                }
+            }
+
+            if (boxes.length === 0) {
+                resultsDiv.innerHTML = '<p class="error">Error: No boxes added.</p>';
+                return;
+            }
+
+            // Run packing
+            const result = packBoxes(pallet, boxes);
+
+            // Display text results
+            if (result.unfit.length > 0) {
+                resultsDiv.innerHTML += `<p class="error">Not all boxes fit! Unfit boxes: ${result.unfit.map(b => b.name).join(', ')}</p>`;
+            } else {
+                resultsDiv.innerHTML += '<p style="color: green;">All boxes fit on the pallet.</p>';
+            }
+
+            const usedVolume = result.items.reduce((acc, item) => acc + (item.dimension[0] * item.dimension[1] * item.dimension[2]), 0);
+            const palletVolume = pallet.w * pallet.h * pallet.d;
+            const efficiency = ((usedVolume / palletVolume) * 100).toFixed(2);
+            resultsDiv.innerHTML += `<p>Space Utilization: ${efficiency}%</p>`;
+
+            // Initialize 3D scene and add boxes
+            initThreeJS(pallet);
+            addBoxesToScene(result.items);
+        }
+
+        // Add event listeners to pallet inputs
+        const palletInputs = document.querySelectorAll('#pallet-width, #pallet-depth, #pallet-height, #pallet-max-weight');
+        palletInputs.forEach(input => {
+            input.addEventListener('input', debounce(calculatePacking, 300));
+        });
+
+        // Add one box input by default
+        addBoxInput();
+    </script>
+</body>
+</html>
+</xaiArtifact>
